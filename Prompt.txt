@@ -1,0 +1,768 @@
+# AnimalVision — Build From Scratch
+
+Build a complete, clean, working **AnimalVision** animal-classification web application from scratch.
+
+The project must be designed to work on **Android using Acode + Termux**, with Python running the local web server and TensorFlow doing the training. Do not assume a desktop IDE, Node.js build system, React, Vite, npm, or Docker.
+
+The final project must be simple enough to edit directly in Acode.
+
+## Goal
+
+AnimalVision is an animal image classifier.
+
+It must:
+
+1. Train a CNN locally from an image-folder dataset.
+2. Save the trained model.
+3. Convert the trained model into a browser-compatible TensorFlow.js model.
+4. Run the model directly in the browser.
+5. Allow the user to upload or drag/drop an image.
+6. Resize the image to exactly **64×64** before inference.
+7. Display the predicted animal and confidence.
+8. Display the top 5 predictions.
+9. Have a separate OpenRouter mode.
+10. Have a clean dark UI.
+11. Work entirely from a simple Python server.
+12. Be easy to modify in Acode.
+
+---
+
+# Supported Classes
+
+Use exactly these classes and preserve this order everywhere:
+
+```text
+bear
+cat
+deer
+dog
+elephant
+fox
+giraffe
+horse
+lion
+monkey
+panda
+rabbit
+tiger
+wolf
+zebra
+```
+
+The dataset must therefore use:
+
+```text
+dataset/
+├── bear/
+├── cat/
+├── deer/
+├── dog/
+├── elephant/
+├── fox/
+├── giraffe/
+├── horse/
+├── lion/
+├── monkey/
+├── panda/
+├── rabbit/
+├── tiger/
+├── wolf/
+└── zebra/
+```
+
+Do NOT hardcode a different class order in JavaScript.
+
+The training script must obtain the class names from the dataset and save the exact resulting order into:
+
+```text
+models/classes.json
+```
+
+The browser must load the same `classes.json`.
+
+---
+
+# Project Structure
+
+Create exactly this structure:
+
+```text
+AnimalVision/
+│
+├── app.py
+├── train.py
+├── convert.py
+├── requirements.txt
+├── README.md
+│
+├── dataset/
+│   ├── bear/
+│   ├── cat/
+│   ├── deer/
+│   ├── dog/
+│   ├── elephant/
+│   ├── fox/
+│   ├── giraffe/
+│   ├── horse/
+│   ├── lion/
+│   ├── monkey/
+│   ├── panda/
+│   ├── rabbit/
+│   ├── tiger/
+│   ├── wolf/
+│   └── zebra/
+│
+├── models/
+│   ├── animal_model.keras
+│   ├── classes.json
+│   └── training_history.json
+│
+├── model/
+│   └── web_model/
+│       ├── model.json
+│       ├── group1-shard1of1.bin
+│       └── classes.json
+│
+├── templates/
+│   └── index.html
+│
+└── static/
+    ├── app.js
+    └── style.css
+```
+
+Do not create unnecessary files.
+
+---
+
+# Training
+
+Create `train.py`.
+
+Use TensorFlow/Keras.
+
+Use a small CNN suitable for a low-resource Android device.
+
+Input:
+
+```text
+64 × 64 × 3
+```
+
+Output:
+
+```text
+15 classes
+```
+
+Use:
+
+* Rescaling 1/255
+* Conv2D
+* BatchNormalization
+* MaxPooling
+* GlobalAveragePooling
+* Dense
+* Dropout
+* Softmax
+
+Use:
+
+```text
+sparse_categorical_crossentropy
+```
+
+Use Adam.
+
+Use validation split.
+
+Use data augmentation:
+
+* horizontal flip
+* small rotation
+* small zoom
+* small contrast adjustment
+
+Do NOT use excessive augmentation.
+
+---
+
+# IMPORTANT TRAINING VALIDATION
+
+The training script must actively detect broken training.
+
+Before training, print:
+
+```text
+Class distribution
+```
+
+showing the number of images in every class.
+
+If a class contains zero images, stop with a clear error.
+
+Calculate class weights automatically to reduce the effect of dataset imbalance.
+
+During training, print:
+
+* training accuracy
+* validation accuracy
+* training loss
+* validation loss
+
+Use:
+
+* ModelCheckpoint
+* EarlyStopping
+* ReduceLROnPlateau
+
+After training, evaluate the validation set.
+
+Then perform a prediction-distribution test.
+
+Print something like:
+
+```text
+Prediction distribution:
+
+bear: 12
+cat: 15
+deer: 10
+dog: 13
+...
+tiger: 14
+...
+zebra: 11
+```
+
+If almost every validation image is predicted as one class, print a large warning:
+
+```text
+WARNING: MODEL COLLAPSE DETECTED
+The model is predicting almost everything as one class.
+Check dataset quality and training.
+```
+
+Do not silently declare training successful.
+
+---
+
+# Test Images
+
+Create a simple optional directory:
+
+```text
+test_images/
+```
+
+The training script should NOT require test images.
+
+If test images exist, allow:
+
+```bash
+python train.py --test test_images/
+```
+
+to run predictions on them.
+
+Print:
+
+```text
+filename → prediction → confidence
+```
+
+---
+
+# Model Conversion
+
+Create `convert.py`.
+
+The training model must first be saved as:
+
+```text
+models/animal_model.keras
+```
+
+Then convert it into a **browser-compatible TensorFlow.js model**.
+
+The browser uses:
+
+```javascript
+tf.loadLayersModel(
+    "/model/web_model/model.json"
+)
+```
+
+Do NOT use `loadGraphModel()`.
+
+The converter must produce:
+
+```text
+model/web_model/model.json
+model/web_model/*.bin
+model/web_model/classes.json
+```
+
+Copy the exact `models/classes.json` into `model/web_model/classes.json`.
+
+The conversion process must verify that:
+
+1. `model.json` exists.
+2. weight files exist.
+3. `classes.json` exists.
+4. the model can be loaded using TensorFlow.js-compatible format.
+5. the input shape is `[null, 64, 64, 3]`.
+6. the output contains 15 classes.
+
+Avoid Keras 3 / TensorFlow.js incompatibilities.
+
+If the installed TensorFlow.js converter cannot correctly convert the Keras model, provide a compatible conversion route rather than producing a broken `model.json`.
+
+Do not generate a GraphDef model when the browser code expects a Layers Model.
+
+---
+
+# Browser Model Preprocessing
+
+The browser must use exactly the same preprocessing as training.
+
+Before inference:
+
+1. Load the uploaded image.
+2. Draw it to a canvas.
+3. Resize it to exactly:
+
+```text
+64 × 64
+```
+
+4. Convert pixels to float32.
+5. Normalize using:
+
+```text
+pixel / 255
+```
+
+6. Add the batch dimension.
+
+Final tensor:
+
+```text
+[1, 64, 64, 3]
+```
+
+Do not use a different normalization method.
+
+---
+
+# Browser UI
+
+Create a clean modern dark interface.
+
+Do NOT make it look AI-generated.
+
+Use simple CSS.
+
+Main page:
+
+```text
+AnimalVision
+
+AI animal classification
+
+[ My Model ] [ OpenRouter ]
+
+┌─────────────────────────────┐
+│                             │
+│       Choose an image       │
+│                             │
+│   Click or drag an image    │
+│                             │
+└─────────────────────────────┘
+
+[ Analyze Image ]
+
+Result
+
+Animal
+Tiger
+
+Confidence
+87.4%
+
+██████████████████░░
+
+Top predictions
+
+Cat       87.4%
+Tiger      8.1%
+...
+```
+
+Use a dark background.
+
+Keep the interface compact and responsive.
+
+It must work properly on Android screens.
+
+Do not include a developer console in the normal UI.
+
+Do not show raw TensorFlow errors to normal users.
+
+---
+
+# Image Upload
+
+Support:
+
+* file picker
+* drag and drop
+* image preview
+* remove image
+* analyze button
+
+Only accept image files.
+
+Show a clear error for invalid files.
+
+---
+
+# Local Model Mode
+
+Default mode:
+
+```text
+My Model
+```
+
+When selected:
+
+1. Load `/model/web_model/model.json`.
+2. Load `/model/web_model/classes.json`.
+3. Resize image to 64×64.
+4. Normalize.
+5. Run prediction.
+6. Sort predictions by confidence.
+7. Display top result.
+8. Display top 5.
+
+Use:
+
+```javascript
+tf.loadLayersModel(
+    "/model/web_model/model.json"
+)
+```
+
+Never use:
+
+```javascript
+tf.loadGraphModel()
+```
+
+for this model.
+
+Cache the loaded model so it isn't loaded for every image.
+
+---
+
+# OpenRouter Mode
+
+Create a separate toggle/button:
+
+```text
+My Model
+OpenRouter
+```
+
+OpenRouter must NOT interfere with the local model.
+
+The server should handle OpenRouter requests.
+
+Do NOT put an OpenRouter API key directly into frontend JavaScript.
+
+Use an environment variable:
+
+```text
+OPENROUTER_API_KEY
+```
+
+The Python server should read it from the environment.
+
+If the key is missing, show:
+
+```text
+OpenRouter is not configured.
+Set OPENROUTER_API_KEY in the environment.
+```
+
+Do not crash the entire application.
+
+Use a current free vision-capable OpenRouter model when configured, but make the model name a configuration value instead of hardcoding it throughout the application.
+
+Example:
+
+```text
+OPENROUTER_MODEL
+```
+
+---
+
+# Flask Server
+
+Use Flask.
+
+`app.py` must:
+
+* serve the webpage
+* serve static files
+* serve the TensorFlow.js model
+* serve model JSON
+* serve binary weight files
+* serve classes.json
+* provide the OpenRouter endpoint
+* provide a simple health endpoint
+
+Health endpoint:
+
+```text
+GET /health
+```
+
+Return JSON similar to:
+
+```json
+{
+  "server": true,
+  "model_json": true,
+  "model_bin": true,
+  "classes": true,
+  "openrouter": true
+}
+```
+
+Do not expose the OpenRouter API key.
+
+---
+
+# Model Serving
+
+These URLs must work:
+
+```text
+/model/web_model/model.json
+/model/web_model/group1-shard1of1.bin
+/model/web_model/classes.json
+```
+
+If the converter generates multiple `.bin` files, serve all of them correctly.
+
+Do not assume the shard is always named `group1-shard1of1.bin`.
+
+TensorFlow.js must be able to follow the paths in `model.json`.
+
+---
+
+# Diagnostics
+
+Do NOT create a giant developer console.
+
+Instead, errors should appear in a small normal UI message:
+
+```text
+Something went wrong.
+
+The local model could not be loaded.
+```
+
+In browser developer console, normal `console.error()` logging is okay.
+
+The actual webpage should stay clean.
+
+---
+
+# Error Handling
+
+Handle:
+
+* missing model
+* missing weights
+* invalid model
+* missing classes.json
+* invalid image
+* empty dataset
+* missing class
+* OpenRouter unavailable
+* OpenRouter API error
+* invalid model output
+* server errors
+
+Never allow an exception to completely break the UI.
+
+---
+
+# Requirements
+
+Create `requirements.txt`.
+
+Keep dependencies minimal.
+
+The training requirements may include TensorFlow and NumPy.
+
+The server requires Flask.
+
+Do not add unnecessary packages.
+
+---
+
+# README
+
+Create a simple README explaining:
+
+1. Dataset structure.
+2. How to train.
+3. How to convert.
+4. How to start the server.
+5. How to open it in Acode/browser.
+6. How to configure OpenRouter.
+7. How to add more training images.
+8. How to retrain.
+
+Example workflow:
+
+```bash
+python train.py
+python convert.py
+python app.py
+```
+
+---
+
+# IMPORTANT: Do Not Fake Anything
+
+Do not create fake predictions.
+
+Do not make the UI randomly choose an animal.
+
+Do not hardcode `"tiger"`.
+
+Do not use a fallback animal.
+
+The displayed prediction must always come from the actual model.
+
+If the local model fails, clearly say:
+
+```text
+Local model unavailable.
+```
+
+Do not silently switch to OpenRouter.
+
+---
+
+# Final Verification
+
+Before declaring the project complete, verify:
+
+```text
+python train.py
+```
+
+successfully trains.
+
+Then:
+
+```text
+python convert.py
+```
+
+successfully creates the web model.
+
+Then:
+
+```text
+python app.py
+```
+
+starts the server.
+
+Verify:
+
+```text
+GET /health
+```
+
+returns healthy status.
+
+Verify:
+
+```text
+/model/web_model/model.json
+```
+
+returns HTTP 200.
+
+Verify the weight file returns HTTP 200.
+
+Verify:
+
+```text
+/model/web_model/classes.json
+```
+
+returns the correct 15 classes.
+
+Verify the browser successfully executes:
+
+```javascript
+tf.loadLayersModel(
+    "/model/web_model/model.json"
+)
+```
+
+Verify a 64×64×3 image can be passed through the model.
+
+Verify the prediction index correctly maps to `classes.json`.
+
+Verify that the model does NOT always return the same class.
+
+If it does, do not hide the problem. Report the prediction distribution and training metrics.
+
+---
+
+# Coding Style
+
+Keep the code:
+
+* short
+* clean
+* readable
+* modular
+* beginner-friendly
+* heavily focused on reliability
+
+Do not create enormous files unnecessarily.
+
+Do not use React.
+
+Do not use npm.
+
+Do not use TypeScript.
+
+Do not use a complicated frontend framework.
+
+Use:
+
+```text
+HTML
+CSS
+Vanilla JavaScript
+Flask
+TensorFlow/Keras
+TensorFlow.js
+```
+
+The entire project should be comfortable to edit from **Acode on Android**.
+
+Build the complete project now, including all source files and the training/conversion pipeline.
+
