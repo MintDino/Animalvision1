@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AnimalVision</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>AnimalVision</h1>
+        <p>AI animal classification</p>
+      </header>
+
+      <section class="mode-switch" aria-label="Model selection">
+        <button class="mode-button active" type="button" data-mode="local">My Model</button>
+        <button class="mode-button" type="button" data-mode="openrouter">OpenRouter</button>
+      </section>
+
+      <section class="upload-panel">
+        <div id="dropZone" class="drop-zone" tabindex="0" aria-label="Upload image">
+          <input id="imageInput" type="file" accept="image/*" hidden />
+          <div class="drop-content" id="dropContent">
+            <div class="icon">+</div>
+            <div class="text-area">
+              <strong>Choose an image</strong>
+              <span>Click or drag an image</span>
+            </div>
+          </div>
+        </div>
+        <div class="image-actions">
+          <button id="analyzeBtn" class="primary" type="button">Analyze Image</button>
+          <button id="removeBtn" class="ghost" type="button">Remove</button>
+        </div>
+      </section>
+
+      <div id="messageBox" class="message-box hidden" role="alert"></div>
+
+      <section class="preview-panel hidden" id="previewPanel">
+        <img id="previewImage" alt="Selected preview" />
+      </section>
+
+      <section class="result-panel">
+        <h2>Result</h2>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <span class="label">Animal</span>
+            <strong id="animalName">—</strong>
+          </div>
+          <div class="stat-item">
+            <span class="label">Confidence</span>
+            <strong id="confidenceValue">—</strong>
+          </div>
+        </div>
+
+        <div class="meter-wrap">
+          <div id="confidenceBar" class="meter-bar"></div>
+        </div>
+
+        <div class="predictions-wrap">
+          <h3>Top predictions</h3>
+          <ul id="topPredictions" class="predictions-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
