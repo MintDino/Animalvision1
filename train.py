@@ -175,36 +175,47 @@ def compute_class_weights(class_counts):
 
 
 def build_model():
+    # Use pre-trained MobileNetV2 as backbone for transfer learning
+    base_model = keras.applications.MobileNetV2(
+        input_shape=(64, 64, 3),
+        include_top=False,
+        weights="imagenet",
+    )
+    # Freeze base model weights for initial training
+    base_model.trainable = False
+    
     inputs = keras.Input(shape=(64, 64, 3), name="input_image")
-    x = layers.Rescaling(1.0 / 255.0)(inputs)
-    x = layers.RandomFlip("horizontal")(x)
-    x = layers.RandomRotation(0.08)(x)
-    x = layers.RandomZoom(0.1)(x)
-    x = layers.RandomContrast(0.1)(x)
-
-    x = layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling2D()(x)
-
-    x = layers.Conv2D(64, 3, activation="relu", padding="same")(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling2D()(x)
-
-    x = layers.Conv2D(128, 3, activation="relu", padding="same")(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling2D()(x)
-
+    
+    # Apply data augmentation
+    x = layers.RandomFlip("horizontal")(inputs)
+    x = layers.RandomRotation(0.15)(x)
+    x = layers.RandomZoom(0.2)(x)
+    x = layers.RandomContrast(0.2)(x)
+    x = layers.RandomBrightness(0.1)(x)
+    
+    # Rescale and preprocess for MobileNetV2
+    x = layers.Rescaling(1.0 / 127.5, offset=-1)(x)
+    
+    # Pass through pre-trained base
+    x = base_model(x, training=False)
+    
+    # Add custom top layers
     x = layers.GlobalAveragePooling2D()(x)
-    x = layers.Dense(64, activation="relu")(x)
-    x = layers.Dropout(0.25)(x)
+    x = layers.Dense(256, activation="relu")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.4)(x)
+    x = layers.Dense(128, activation="relu")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.3)(x)
     outputs = layers.Dense(len(CLASS_NAMES), activation="softmax")(x)
+    
     model = keras.Model(inputs, outputs)
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=1e-3),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-    return model
+    return model, base_model
 
 
 def create_dataset():
@@ -234,6 +245,7 @@ def create_dataset():
         color_mode="rgb",
     )
 
+    train_ds = train_ds.shuffle(buffer_size=800)
     train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
     return train_ds, val_ds
@@ -249,6 +261,12 @@ def save_history(history):
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     with open(HISTORY_PATH, "w", encoding="utf-8") as handle:
         json.dump(history.history, handle, indent=2)
+
+
+def save_history_dict(history_dict):
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(HISTORY_PATH, "w", encoding="utf-8") as handle:
+        json.dump(history_dict, handle, indent=2)
 
 
 def print_prediction_distribution(model, val_ds):
@@ -303,8 +321,9 @@ def main():
     weights_map = compute_class_weights(class_counts)
     train_ds, val_ds = create_dataset()
 
-    model = build_model()
+    model, base_model = build_model()
 
+    # First training phase: frozen base
     checkpoint = keras.callbacks.ModelCheckpoint(
         str(MODEL_PATH),
         save_best_only=True,
@@ -313,25 +332,43 @@ def main():
     )
     early_stop = keras.callbacks.EarlyStopping(
         monitor="val_loss",
-        patience=6,
+        patience=5,
         restore_best_weights=True,
     )
     reduce_lr = keras.callbacks.ReduceLROnPlateau(
         monitor="val_loss",
         factor=0.5,
-        patience=3,
+        patience=2,
         min_lr=1e-6,
     )
 
+    print("Phase 1: Training with frozen base model")
     history = model.fit(
         train_ds,
         validation_data=val_ds,
-        epochs=18,
+        epochs=15,
         callbacks=[checkpoint, early_stop, reduce_lr],
         class_weight=weights_map,
     )
 
-    print("\nTraining metrics: ")
+    print("\nPhase 2: Fine-tuning with unfrozen base model")
+    base_model.trainable = True
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    
+    history2 = model.fit(
+        train_ds,
+        validation_data=val_ds,
+        epochs=15,
+        callbacks=[checkpoint, early_stop, reduce_lr],
+        class_weight=weights_map,
+        initial_epoch=len(history.history["loss"]),
+    )
+
+    print("\nTraining metrics (Phase 1): ")
     for epoch in range(len(history.history["loss"])):
         print(
             f"Epoch {epoch + 1}: "
@@ -341,10 +378,31 @@ def main():
             f"val_accuracy={history.history['val_accuracy'][epoch]:.4f}"
         )
 
+    if history2.history and "loss" in history2.history and len(history2.history["loss"]) > 0:
+        print("\nTraining metrics (Phase 2): ")
+        for epoch in range(len(history2.history["loss"])):
+            print(
+                f"Epoch {len(history.history['loss']) + epoch + 1}: "
+                f"loss={history2.history['loss'][epoch]:.4f}, "
+                f"accuracy={history2.history['accuracy'][epoch]:.4f}, "
+                f"val_loss={history2.history['val_loss'][epoch]:.4f}, "
+                f"val_accuracy={history2.history['val_accuracy'][epoch]:.4f}"
+            )
+        
+        # Save combined history
+        combined_history = {
+            "loss": history.history["loss"] + history2.history["loss"],
+            "accuracy": history.history["accuracy"] + history2.history["accuracy"],
+            "val_loss": history.history["val_loss"] + history2.history["val_loss"],
+            "val_accuracy": history.history["val_accuracy"] + history2.history["val_accuracy"],
+        }
+    else:
+        combined_history = history.history
+
     val_loss, val_accuracy = model.evaluate(val_ds, verbose=0)
     print(f"\nValidation result: loss={val_loss:.4f}, accuracy={val_accuracy:.4f}")
 
-    save_history(history)
+    save_history_dict(combined_history)
     print_prediction_distribution(model, val_ds)
 
     if args.test:
