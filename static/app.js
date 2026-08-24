@@ -4,6 +4,7 @@ const state = {
   model: null,
   classes: [],
   mode: "local",
+  isAnalyzing: false,
 };
 
 const elements = {
@@ -133,28 +134,45 @@ async function classifyLocalModel() {
   }
 
   try {
+    showMessage("Loading model (first use only)...");
+    elements.analyzeBtn.disabled = true;
+    
     const image = new Image();
     image.onload = async () => {
-      const tensor = preprocessImage(image);
-      const model = await loadLocalModel();
-      const result = model.predict(tensor);
-      const probabilities = await result.data();
-      const predictions = probabilities
-        .map((score, idx) => [state.classes[idx] || `class_${idx}`, score * 100])
-        .sort((a, b) => b[1] - a[1]);
+      try {
+        showMessage("Preprocessing image...");
+        const tensor = preprocessImage(image);
+        
+        showMessage("Running inference...");
+        const model = await loadLocalModel();
+        const result = model.predict(tensor);
+        const probabilities = await result.data();
+        const predictions = probabilities
+          .map((score, idx) => [state.classes[idx] || `class_${idx}`, score * 100])
+          .sort((a, b) => b[1] - a[1]);
 
-      const [topLabel, topScore] = predictions[0];
-      elements.animalName.textContent = topLabel;
-      elements.confidenceValue.textContent = `${topScore.toFixed(1)}%`;
-      elements.confidenceBar.style.width = `${Math.min(topScore, 100)}%`;
-      renderPredictions(predictions);
-      tensor.dispose();
-      result.dispose();
+        const [topLabel, topScore] = predictions[0];
+        elements.animalName.textContent = topLabel;
+        elements.confidenceValue.textContent = `${topScore.toFixed(1)}%`;
+        elements.confidenceBar.style.width = `${Math.min(topScore, 100)}%`;
+        renderPredictions(predictions);
+        clearMessage();
+        tensor.dispose();
+        result.dispose();
+      } catch (error) {
+        console.error(error);
+        showMessage("Error during analysis: " + error.message);
+      } finally {
+        elements.analyzeBtn.disabled = false;
+        state.isAnalyzing = false;
+      }
     };
     image.src = state.selectedImage;
   } catch (error) {
     console.error(error);
-    showMessage("Something went wrong.\nThe local model could not be loaded.");
+    showMessage("Error: " + error.message);
+    elements.analyzeBtn.disabled = false;
+    state.isAnalyzing = false;
   }
 }
 
@@ -168,6 +186,9 @@ async function classifyOpenRouter() {
   formData.append("image", state.selectedFile);
 
   try {
+    showMessage("Sending to OpenRouter...");
+    elements.analyzeBtn.disabled = true;
+    
     const response = await fetch("/api/openrouter", {
       method: "POST",
       body: formData,
@@ -187,12 +208,22 @@ async function classifyOpenRouter() {
     clearMessage();
   } catch (error) {
     console.error(error);
-    showMessage("Something went wrong.\nThe local model could not be loaded.");
+    showMessage("Error: " + error.message);
+  } finally {
+    elements.analyzeBtn.disabled = false;
+    state.isAnalyzing = false;
   }
 }
 
 async function analyzeImage() {
+  if (state.isAnalyzing) {
+    showMessage("Analysis already in progress...");
+    return;
+  }
+  
+  state.isAnalyzing = true;
   clearMessage();
+  
   if (state.mode === "openrouter") {
     await classifyOpenRouter();
   } else {
