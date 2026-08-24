@@ -79,7 +79,10 @@ def convert_model(model):
             source_weights[layer.name] = layer.get_weights()
             if isinstance(layer, tf.keras.layers.InputLayer):
                 continue
+            # Skip data augmentation and preprocessing layers
             if layer.__class__.__name__.startswith("Random"):
+                continue
+            if isinstance(layer, tf.keras.layers.Rescaling):
                 continue
             exported = layer(exported, training=False)
 

@@ -98,10 +98,11 @@ function preprocessImage(imageElement) {
   const imageData = context.getImageData(0, 0, 64, 64);
   const pixels = new Float32Array(64 * 64 * 3);
   let index = 0;
+  // MobileNetV2 preprocessing: normalize to [-1, 1]
   for (let i = 0; i < imageData.data.length; i += 4) {
-    pixels[index] = imageData.data[i] / 255.0;
-    pixels[index + 1] = imageData.data[i + 1] / 255.0;
-    pixels[index + 2] = imageData.data[i + 2] / 255.0;
+    pixels[index] = (imageData.data[i] / 127.5) - 1.0;
+    pixels[index + 1] = (imageData.data[i + 1] / 127.5) - 1.0;
+    pixels[index + 2] = (imageData.data[i + 2] / 127.5) - 1.0;
     index += 3;
   }
 
