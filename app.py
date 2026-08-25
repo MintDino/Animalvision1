@@ -165,7 +165,7 @@ def openrouter():
                 "content": [
                     {
                         "type": "text",
-                        "text": "Classify the main animal in the image. Return only valid JSON with keys: label and confidence. Use one of these exact animal labels: bear, cat, deer, dog, elephant, fox, giraffe, horse, lion, monkey, panda, rabbit, tiger, wolf, zebra. Confidence must be a number between 0 and 100.",
+                        "text": "Classify the main animal in the image. Return only valid JSON with keys: label and confidence. Use one of these exact animal labels: bear, cat, deer, dog, elephant, fox, giraffe, horse, lion, monkey, panda, rabbit, tiger, wolf, zebra, owl, penguin, shark, dolphin, snake. Confidence must be a number between 0 and 100.",
                     },
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ],
@@ -218,6 +218,11 @@ def openrouter():
             "tiger",
             "wolf",
             "zebra",
+            "owl",
+            "penguin",
+            "shark",
+            "dolphin",
+            "snake",
         }:
             raise ValueError("Invalid animal label returned by OpenRouter.")
         return jsonify({"animal": label, "confidence": max(0.0, min(confidence, 100.0))})

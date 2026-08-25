@@ -28,6 +28,11 @@ CANONICAL_CLASS_ORDER = [
     "tiger",
     "wolf",
     "zebra",
+    "owl",
+    "penguin",
+    "shark",
+    "dolphin",
+    "snake",
 ]
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -68,6 +73,11 @@ def generate_synthetic_dataset():
                 "tiger": (218, 150, 38),
                 "wolf": (130, 138, 150),
                 "zebra": (180, 180, 180),
+                "owl": (112, 96, 78),
+                "penguin": (55, 75, 90),
+                "shark": (95, 130, 150),
+                "dolphin": (80, 150, 175),
+                "snake": (95, 135, 72),
             }[class_name]
             for channel in range(3):
                 image[:, :, channel] = np.clip(

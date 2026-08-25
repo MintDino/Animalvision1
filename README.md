@@ -23,13 +23,18 @@ dataset/
   tiger/
   wolf/
   zebra/
+  owl/
+  penguin/
+  shark/
+  dolphin/
+  snake/
 ```
 
 Add images into each class folder. The script expects exactly the class names shown above, in that order.
 
 ## Download the dataset
 
-The downloader uses the public iNaturalist API and saves validated JPEG images into the class folders. It keeps existing valid images and can resume safely:
+The downloader uses the public iNaturalist API and saves a balanced target of 5,000 validated JPEG images into the class folders. It keeps existing valid images and can resume safely:
 
 ```bash
 python scripts/download_dataset.py

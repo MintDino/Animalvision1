@@ -17,15 +17,16 @@ from PIL import Image, UnidentifiedImageError
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATASET_DIR = BASE_DIR / "dataset"
 API_URL = "https://api.inaturalist.org/v1"
-TARGET_TOTAL = 1000
+TARGET_TOTAL = 5000
 MIN_WIDTH = 64
 MIN_HEIGHT = 64
-PER_CLASS = TARGET_TOTAL // 15
-EXTRA_IMAGES = TARGET_TOTAL % 15
 CLASS_NAMES = [
     "bear", "cat", "deer", "dog", "elephant", "fox", "giraffe", "horse",
     "lion", "monkey", "panda", "rabbit", "tiger", "wolf", "zebra",
+    "owl", "penguin", "shark", "dolphin", "snake",
 ]
+PER_CLASS = TARGET_TOTAL // len(CLASS_NAMES)
+EXTRA_IMAGES = TARGET_TOTAL % len(CLASS_NAMES)
 
 # Scientific taxa avoid ambiguous common-name matches in the public API.
 TAXON_QUERIES = {
@@ -35,6 +36,8 @@ TAXON_QUERIES = {
     "lion": "Panthera leo", "monkey": "Simiiformes",
     "panda": "Ailuropoda melanoleuca", "rabbit": "Leporidae",
     "tiger": "Panthera tigris", "wolf": "Canis lupus", "zebra": "Equus quagga",
+    "owl": "Strigiformes", "penguin": "Sphenisciformes", "shark": "Selachimorpha",
+    "dolphin": "Delphinidae", "snake": "Serpentes",
 }
 
 
@@ -158,7 +161,7 @@ def download_class(class_name, counts):
     if counts[class_name] >= target:
         return None
     taxon_id = resolve_taxon(class_name)
-    for page in range(1, 20):
+    for page in range(1, 51):
         if counts[class_name] >= target:
             break
         try:
