@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 
 import base64
+import io
 import json
 import os
 from pathlib import Path
 from urllib import error as urllib_error
 import urllib.request as urllib_request
 
+import numpy as np
 from flask import Flask, jsonify, render_template, send_from_directory, request as flask_request
+from PIL import Image
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "model" / "web_model"
+KERAS_MODEL_PATH = BASE_DIR / "models" / "animal_model.keras"
+CLASSES_PATH = BASE_DIR / "models" / "classes.json"
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_DIR = BASE_DIR / "templates"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(TEMPLATE_DIR))
+local_model = None
+local_classes = None
 
 
 def normalize_tfjs_topology(value):
@@ -73,6 +80,40 @@ def health():
             "openrouter": bool(OPENROUTER_API_KEY),
         }
     )
+
+
+def get_local_model():
+    global local_model, local_classes
+    if local_model is None:
+        import tensorflow as tf
+
+        local_model = tf.keras.models.load_model(str(KERAS_MODEL_PATH), compile=False)
+        with CLASSES_PATH.open("r", encoding="utf-8") as handle:
+            local_classes = json.load(handle)
+    return local_model, local_classes
+
+
+@app.route("/api/local-predict", methods=["POST"])
+def local_predict():
+    image_file = flask_request.files.get("image")
+    if image_file is None:
+        return jsonify({"error": "No image uploaded."}), 400
+
+    try:
+        image = Image.open(io.BytesIO(image_file.read())).convert("RGB")
+        image = image.resize((64, 64))
+        image_array = np.asarray(image, dtype=np.float32)[None, ...]
+        model, classes = get_local_model()
+        probabilities = model.predict(image_array, verbose=0)[0]
+        predictions = [
+            {"label": classes[index], "confidence": float(score * 100)}
+            for index, score in enumerate(probabilities)
+        ]
+        predictions.sort(key=lambda item: item["confidence"], reverse=True)
+        return jsonify({"predictions": predictions})
+    except Exception as exc:  # pragma: no cover
+        app.logger.exception("Local model prediction failed")
+        return jsonify({"error": f"Local model prediction failed: {exc}"}), 500
 
 
 @app.route("/model/web_model/<path:filename>")
