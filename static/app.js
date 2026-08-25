@@ -77,15 +77,97 @@ async function loadLocalModel() {
   }
 
   try {
-    const model = await tf.loadLayersModel("/model/web_model/model.json");
+    const modelResponse = await fetch("/model/web_model/model.json");
+    if (!modelResponse.ok) {
+      throw new Error(`Model manifest request failed (${modelResponse.status}).`);
+    }
+
+    const modelJson = await modelResponse.json();
+    const modelTopology = normalizeTensorFlowJsTopology(modelJson.modelTopology);
+    const weightSpecs = modelJson.weightsManifest.flatMap((group) => group.weights);
+    const weightBuffers = await Promise.all(
+      modelJson.weightsManifest[0].paths.map(async (path) => {
+        const response = await fetch(`/model/web_model/${path}`);
+        if (!response.ok) {
+          throw new Error(`Model weights request failed (${response.status}).`);
+        }
+        return response.arrayBuffer();
+      }),
+    );
+    const weightData = new Uint8Array(
+      weightBuffers.reduce((total, buffer) => total + buffer.byteLength, 0),
+    );
+    let offset = 0;
+    weightBuffers.forEach((buffer) => {
+      weightData.set(new Uint8Array(buffer), offset);
+      offset += buffer.byteLength;
+    });
+
+    const model = await Promise.race([
+      tf.loadLayersModel({
+        load: async () => ({
+          modelTopology,
+          weightSpecs,
+          weightData,
+        }),
+      }),
+      new Promise((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error("The local model took too long to load.")),
+          30000,
+        );
+      }),
+    ]);
     state.model = model;
     const response = await fetch("/model/web_model/classes.json");
     state.classes = await response.json();
     return model;
   } catch (error) {
     console.error(error);
-    throw new Error("The local model could not be loaded.");
+    throw new Error(`The local model could not be loaded: ${error.message}`);
   }
+}
+
+function normalizeTensorFlowJsTopology(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeTensorFlowJsTopology);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value.args?.[0])) {
+    return value.args[0].map((tensor) => {
+      const history = tensor.config.keras_history;
+      return [
+        history[0],
+        history[1],
+        history[2],
+        normalizeTensorFlowJsTopology(value.kwargs || {}),
+      ];
+    });
+  }
+  if (value.args?.[0]?.config?.keras_history) {
+    const history = value.args[0].config.keras_history;
+    return [
+      history[0],
+      history[1],
+      history[2],
+      normalizeTensorFlowJsTopology(value.kwargs || {}),
+    ];
+  }
+
+  const normalized = {};
+  Object.entries(value).forEach(([key, child]) => {
+    if (key === "batch_shape") {
+      normalized.batchInputShape = normalizeTensorFlowJsTopology(child);
+    } else if (key === "inbound_nodes") {
+      normalized.inboundNodes = normalizeTensorFlowJsTopology(child);
+    } else if (key !== "optional") {
+      normalized[key] = normalizeTensorFlowJsTopology(child);
+    }
+  });
+  return normalized;
 }
 
 function preprocessImage(imageElement) {
@@ -143,10 +225,19 @@ async function classifyLocalModel() {
         showMessage("Preprocessing image...");
         const tensor = preprocessImage(image);
         
-        showMessage("Running inference...");
+        showMessage("Loading the local model...");
         const model = await loadLocalModel();
+        showMessage("Running inference...");
         const result = model.predict(tensor);
-        const probabilities = await result.data();
+        const probabilities = await Promise.race([
+          result.data(),
+          new Promise((_, reject) => {
+            window.setTimeout(
+              () => reject(new Error("Local inference took too long.")),
+              30000,
+            );
+          }),
+        ]);
         const predictions = probabilities
           .map((score, idx) => [state.classes[idx] || `class_${idx}`, score * 100])
           .sort((a, b) => b[1] - a[1]);

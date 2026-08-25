@@ -19,6 +19,41 @@ OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(TEMPLATE_DIR))
 
 
+def normalize_tfjs_topology(value):
+    if isinstance(value, list):
+        return [normalize_tfjs_topology(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    args = value.get("args")
+    if isinstance(args, list) and args:
+        tensors = args[0]
+        kwargs = normalize_tfjs_topology(value.get("kwargs", {}))
+        if isinstance(tensors, list):
+            return [
+                [
+                    tensor["config"]["keras_history"][0],
+                    tensor["config"]["keras_history"][1],
+                    tensor["config"]["keras_history"][2],
+                    kwargs,
+                ]
+                for tensor in tensors
+            ]
+        if isinstance(tensors, dict) and "config" in tensors:
+            history = tensors["config"]["keras_history"]
+            return [history[0], history[1], history[2], kwargs]
+
+    normalized = {}
+    for key, child in value.items():
+        if key == "batch_shape":
+            normalized["batchInputShape"] = normalize_tfjs_topology(child)
+        elif key == "inbound_nodes":
+            normalized["inboundNodes"] = normalize_tfjs_topology(child)
+        elif key != "optional":
+            normalized[key] = normalize_tfjs_topology(child)
+    return normalized
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -42,6 +77,12 @@ def health():
 
 @app.route("/model/web_model/<path:filename>")
 def model_files(filename):
+    if filename == "model.json":
+        model_json_path = MODEL_DIR / filename
+        with model_json_path.open("r", encoding="utf-8") as handle:
+            model_data = json.load(handle)
+        model_data["modelTopology"] = normalize_tfjs_topology(model_data["modelTopology"])
+        return jsonify(model_data)
     return send_from_directory(str(MODEL_DIR), filename)
 
 
