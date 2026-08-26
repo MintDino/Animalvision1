@@ -16,14 +16,16 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "model" / "web_model"
 KERAS_MODEL_PATH = BASE_DIR / "models" / "animal_model.keras"
 CLASSES_PATH = BASE_DIR / "models" / "classes.json"
+MODEL_VERSIONS_DIR = BASE_DIR / "models" / "versions"
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_DIR = BASE_DIR / "templates"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+LOCAL_MODEL_VERSION = os.environ.get("LOCAL_MODEL_VERSION", "current")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(TEMPLATE_DIR))
-local_model = None
-local_classes = None
+local_models = {}
+local_classes = {}
 
 
 def normalize_tfjs_topology(value):
@@ -66,6 +68,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/openrouter")
+def openrouter_page():
+    return render_template("openrouter.html")
+
+
+@app.route("/debug")
+def debug_page():
+    return render_template("debug.html")
+
+
 @app.route("/health")
 def health():
     model_json = MODEL_DIR / "model.json"
@@ -82,15 +94,62 @@ def health():
     )
 
 
-def get_local_model():
-    global local_model, local_classes
-    if local_model is None:
+@app.route("/api/debug")
+def debug_info():
+    model_json = MODEL_DIR / "model.json"
+    bin_files = list(MODEL_DIR.glob("*.bin"))
+    return jsonify(
+        {
+            "server": {"status": "online", "debug": app.debug},
+            "routes": ["/", "/openrouter", "/debug", "/health"],
+            "local_model": {
+                "keras": KERAS_MODEL_PATH.exists(),
+                "web_model_json": model_json.exists(),
+                "web_model_bins": len(bin_files),
+                "classes": CLASSES_PATH.exists(),
+            },
+            "openrouter": {
+                "configured": bool(OPENROUTER_API_KEY),
+                "model": OPENROUTER_MODEL,
+            },
+            "cache": {"loaded_versions": list(local_models)},
+        }
+    )
+
+
+@app.route("/api/model-versions")
+def model_versions():
+    versions = ["current"]
+    if MODEL_VERSIONS_DIR.exists():
+        versions.extend(
+            sorted(
+                path.name
+                for path in MODEL_VERSIONS_DIR.iterdir()
+                if path.is_dir()
+                and (path / "animal_model.keras").exists()
+                and (path / "classes.json").exists()
+            )
+        )
+    return jsonify({"versions": versions})
+
+
+def get_local_model(version):
+    if version not in local_models:
         import tensorflow as tf
 
-        local_model = tf.keras.models.load_model(str(KERAS_MODEL_PATH), compile=False)
-        with CLASSES_PATH.open("r", encoding="utf-8") as handle:
-            local_classes = json.load(handle)
-    return local_model, local_classes
+        if version == "current":
+            model_path = KERAS_MODEL_PATH
+            classes_path = CLASSES_PATH
+        else:
+            version_dir = MODEL_VERSIONS_DIR / version
+            model_path = version_dir / "animal_model.keras"
+            classes_path = version_dir / "classes.json"
+        if not model_path.exists() or not classes_path.exists():
+            raise FileNotFoundError(f"Local model version not found: {version}")
+        local_models[version] = tf.keras.models.load_model(str(model_path), compile=False)
+        with classes_path.open("r", encoding="utf-8") as handle:
+            local_classes[version] = json.load(handle)
+    return local_models[version], local_classes[version]
 
 
 @app.route("/api/local-predict", methods=["POST"])
@@ -100,10 +159,13 @@ def local_predict():
         return jsonify({"error": "No image uploaded."}), 400
 
     try:
+        version = flask_request.form.get("version", "current")
+        if version != "current" and Path(version).name != version:
+            return jsonify({"error": "Invalid local model version."}), 400
         image = Image.open(io.BytesIO(image_file.read())).convert("RGB")
         image = image.resize((64, 64))
         image_array = np.asarray(image, dtype=np.float32)[None, ...]
-        model, classes = get_local_model()
+        model, classes = get_local_model(version)
         probabilities = model.predict(image_array, verbose=0)[0]
         predictions = [
             {"label": classes[index], "confidence": float(score * 100)}

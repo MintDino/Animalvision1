@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
+import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +41,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATASET_DIR = BASE_DIR / "dataset"
 MODELS_DIR = BASE_DIR / "models"
 MODEL_PATH = MODELS_DIR / "animal_model.keras"
+MODEL_VERSIONS_DIR = MODELS_DIR / "versions"
 HISTORY_PATH = MODELS_DIR / "training_history.json"
 CLASSES_PATH = MODELS_DIR / "classes.json"
 
@@ -267,6 +270,16 @@ def save_classes_json():
         json.dump(CLASS_NAMES, handle, indent=2)
 
 
+def snapshot_model(version):
+    if not MODEL_PATH.exists():
+        return
+    version_dir = MODEL_VERSIONS_DIR / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(MODEL_PATH, version_dir / "animal_model.keras")
+    shutil.copy2(CLASSES_PATH, version_dir / "classes.json")
+    print(f"Saved model version: {version_dir}")
+
+
 def save_history(history):
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     with open(HISTORY_PATH, "w", encoding="utf-8") as handle:
@@ -322,9 +335,13 @@ def test_predictions(model, test_dir):
 def main():
     parser = argparse.ArgumentParser(description="Train the AnimalVision classifier.")
     parser.add_argument("--test", type=str, help="Optional test image directory")
+    parser.add_argument("--version", type=str, help="Optional model version name")
     args = parser.parse_args()
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    version = args.version or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if MODEL_PATH.exists() and CLASSES_PATH.exists():
+        snapshot_model(f"before-{version}")
     class_counts = ensure_dataset_ready()
     save_classes_json()
 
@@ -413,6 +430,7 @@ def main():
     print(f"\nValidation result: loss={val_loss:.4f}, accuracy={val_accuracy:.4f}")
 
     save_history_dict(combined_history)
+    snapshot_model(version)
     print_prediction_distribution(model, val_ds)
 
     if args.test:

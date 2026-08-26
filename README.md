@@ -56,7 +56,20 @@ It skips corrupt, tiny, unsupported, duplicate, and GIF files.
 python train.py
 ```
 
-This script checks class counts, trains a CNN, saves the model to `models/animal_model.keras`, and writes `models/classes.json` and `models/training_history.json`.
+This script checks class counts, trains a CNN, saves the current model to `models/animal_model.keras`, and snapshots each run under `models/versions/`. Use `--version` to provide a readable version name. The previous model is saved automatically before training starts.
+
+```bash
+python train.py --version animal-20-class-v1
+```
+
+To run the app with a saved version, set its name before starting Flask:
+
+```bash
+export LOCAL_MODEL_VERSION="animal-20-class-v1"
+python app.py
+```
+
+Use `LOCAL_MODEL_VERSION="current"` to use the latest model.
 
 Optional test prediction run:
 

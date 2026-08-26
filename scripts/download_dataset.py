@@ -6,9 +6,11 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib import error, parse, request
 
@@ -27,6 +29,7 @@ CLASS_NAMES = [
 ]
 PER_CLASS = TARGET_TOTAL // len(CLASS_NAMES)
 EXTRA_IMAGES = TARGET_TOTAL % len(CLASS_NAMES)
+DOWNLOAD_WORKERS = max(1, int(os.environ.get("DOWNLOAD_WORKERS", "8")))
 
 # Scientific taxa avoid ambiguous common-name matches in the public API.
 TAXON_QUERIES = {
@@ -86,6 +89,11 @@ def download_bytes(url, attempts=3):
                 return None
             time.sleep(2 ** attempt)
     return None
+
+
+def fetch_photo(candidate):
+    observation, photo_number, url = candidate
+    return observation, photo_number, download_bytes(url)
 
 
 def valid_images(folder):
@@ -161,24 +169,31 @@ def download_class(class_name, counts):
     if counts[class_name] >= target:
         return None
     taxon_id = resolve_taxon(class_name)
-    for page in range(1, 51):
-        if counts[class_name] >= target:
-            break
-        try:
-            data = http_json("observations", {
-                "taxon_id": taxon_id, "photos": "true", "quality_grade": "research",
-                "order": "votes", "order_by": "desc", "per_page": 100, "page": page,
-            })
-        except RuntimeError as exc:
-            return str(exc)
-        observations = data.get("results", [])
-        if not observations:
-            break
-        for observation in observations:
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
+        for page in range(1, 51):
             if counts[class_name] >= target:
                 break
-            for photo_number, url in enumerate(photo_urls(observation), start=1):
-                raw = download_bytes(url)
+            try:
+                data = http_json("observations", {
+                    "taxon_id": taxon_id, "photos": "true", "quality_grade": "research",
+                    "order": "votes", "order_by": "desc", "per_page": 100, "page": page,
+                })
+            except RuntimeError as exc:
+                return str(exc)
+            observations = data.get("results", [])
+            if not observations:
+                break
+
+            candidates = [
+                (observation, photo_number, url)
+                for observation in observations
+                for photo_number, url in enumerate(photo_urls(observation), start=1)
+            ]
+            futures = [executor.submit(fetch_photo, candidate) for candidate in candidates]
+            for future in as_completed(futures):
+                if counts[class_name] >= target:
+                    break
+                observation, photo_number, raw = future.result()
                 if not raw:
                     continue
                 try:
@@ -195,11 +210,8 @@ def download_class(class_name, counts):
                     hashes.add(digest)
                     counts[class_name] += 1
                     progress(counts, class_name)
-                    break
                 except (OSError, UnidentifiedImageError):
                     continue
-            time.sleep(0.2)
-        time.sleep(1)
     if counts[class_name] < target:
         return "not enough usable images found"
     return None

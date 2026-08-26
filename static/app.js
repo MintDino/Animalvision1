@@ -3,7 +3,8 @@ const state = {
   selectedImage: null,
   model: null,
   classes: [],
-  mode: "local",
+  mode: document.body.dataset.mode || "local",
+  modelVersion: "current",
   isAnalyzing: false,
 };
 
@@ -19,7 +20,10 @@ const elements = {
   confidenceValue: document.getElementById("confidenceValue"),
   confidenceBar: document.getElementById("confidenceBar"),
   topPredictions: document.getElementById("topPredictions"),
-  modeButtons: [...document.querySelectorAll(".mode-button")],
+  modelVersion: document.getElementById("modelVersion"),
+  versionTrigger: document.querySelector(".version-trigger"),
+  versionLabel: document.querySelector(".version-label"),
+  versionOptions: document.querySelector(".version-options"),
 };
 
 function showMessage(message) {
@@ -30,16 +34,6 @@ function showMessage(message) {
 function clearMessage() {
   elements.messageBox.textContent = "";
   elements.messageBox.classList.add("hidden");
-}
-
-function setMode(mode) {
-  state.mode = mode;
-  elements.modeButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.mode === mode);
-  });
-  if (mode === "openrouter") {
-    clearMessage();
-  }
 }
 
 function readImageFile(file) {
@@ -78,6 +72,7 @@ async function loadLocalModel() {
 
   const formData = new FormData();
   formData.append("image", state.selectedFile);
+  formData.append("version", state.modelVersion);
   const response = await fetch("/api/local-predict", {
     method: "POST",
     body: formData,
@@ -201,8 +196,55 @@ async function analyzeImage() {
 }
 
 function bindEvents() {
-  elements.modeButtons.forEach((button) => {
-    button.addEventListener("click", () => setMode(button.dataset.mode));
+  elements.versionTrigger.addEventListener("click", () => {
+    const isOpen = elements.versionTrigger.getAttribute("aria-expanded") === "true";
+    elements.versionTrigger.setAttribute("aria-expanded", String(!isOpen));
+    elements.versionOptions.hidden = isOpen;
+    if (!isOpen) {
+      elements.versionOptions.querySelector(".version-option")?.focus();
+    }
+  });
+
+  elements.versionOptions.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-version]");
+    if (!option) return;
+    state.modelVersion = option.dataset.version;
+    elements.versionLabel.textContent = option.textContent;
+    elements.versionTrigger.setAttribute("aria-expanded", "false");
+    elements.versionOptions.hidden = true;
+    resetPreview();
+    clearMessage();
+  });
+
+  elements.versionTrigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    elements.versionTrigger.click();
+  });
+
+  elements.versionOptions.addEventListener("keydown", (event) => {
+    const options = [...elements.versionOptions.querySelectorAll(".version-option")];
+    const currentIndex = options.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      options[(currentIndex + offset + options.length) % options.length]?.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      document.activeElement?.click();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      elements.versionTrigger.setAttribute("aria-expanded", "false");
+      elements.versionOptions.hidden = true;
+      elements.versionTrigger.focus();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!elements.modelVersion.contains(event.target)) {
+      elements.versionTrigger.setAttribute("aria-expanded", "false");
+      elements.versionOptions.hidden = true;
+    }
   });
 
   elements.input.addEventListener("change", (event) => {
@@ -241,4 +283,25 @@ function bindEvents() {
   });
 }
 
+async function loadModelVersions() {
+  try {
+    const response = await fetch("/api/model-versions");
+    if (!response.ok) return;
+    const data = await response.json();
+    elements.versionOptions.innerHTML = "";
+    data.versions.forEach((version) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.version = version;
+      option.className = "version-option";
+      option.textContent = version === "current" ? "Current model" : version;
+      elements.versionOptions.appendChild(option);
+    });
+  } catch (error) {
+    console.error("Could not load model versions", error);
+  }
+}
+
 bindEvents();
+loadModelVersions();
