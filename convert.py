@@ -23,8 +23,8 @@ def verify_classes_json():
         raise FileNotFoundError(f"Classes file not found: {CLASS_PATH}")
     with open(CLASS_PATH, "r", encoding="utf-8") as handle:
         classes = json.load(handle)
-    if not isinstance(classes, list) or len(classes) != 15:
-        raise ValueError("classes.json must contain exactly 15 class names.")
+    if not isinstance(classes, list) or len(classes) != 20:
+        raise ValueError("classes.json must contain exactly 20 class names.")
     return classes
 
 
@@ -123,8 +123,8 @@ def verify_artifacts():
     output_units = find_output_units(model_data)
     if output_units is None:
         raise ValueError("Could not verify model output class count from model.json.")
-    if output_units != 15:
-        raise ValueError(f"Unexpected output units: {output_units}. Expected 15 classes.")
+    if output_units != 20:
+        raise ValueError(f"Unexpected output units: {output_units}. Expected 20 classes.")
 
     print(f"Verified model.json input shape: {input_shape}")
     print(f"Verified output classes: {output_units}")

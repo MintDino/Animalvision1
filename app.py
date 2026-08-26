@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 
 import base64
+import io
 import json
 import os
 from pathlib import Path
 from urllib import error as urllib_error
 import urllib.request as urllib_request
 
+import numpy as np
 from flask import Flask, jsonify, render_template, send_from_directory, request as flask_request
+from PIL import Image
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "model" / "web_model"
+KERAS_MODEL_PATH = BASE_DIR / "models" / "animal_model.keras"
+CLASSES_PATH = BASE_DIR / "models" / "classes.json"
+MODEL_VERSIONS_DIR = BASE_DIR / "models" / "versions"
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_DIR = BASE_DIR / "templates"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+LOCAL_MODEL_VERSION = os.environ.get("LOCAL_MODEL_VERSION", "current")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(TEMPLATE_DIR))
+local_models = {}
+local_classes = {}
 
 
 def normalize_tfjs_topology(value):
@@ -59,6 +68,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/openrouter")
+def openrouter_page():
+    return render_template("openrouter.html")
+
+
+@app.route("/debug")
+def debug_page():
+    return render_template("debug.html")
+
+
 @app.route("/health")
 def health():
     model_json = MODEL_DIR / "model.json"
@@ -73,6 +92,90 @@ def health():
             "openrouter": bool(OPENROUTER_API_KEY),
         }
     )
+
+
+@app.route("/api/debug")
+def debug_info():
+    model_json = MODEL_DIR / "model.json"
+    bin_files = list(MODEL_DIR.glob("*.bin"))
+    return jsonify(
+        {
+            "server": {"status": "online", "debug": app.debug},
+            "routes": ["/", "/openrouter", "/debug", "/health"],
+            "local_model": {
+                "keras": KERAS_MODEL_PATH.exists(),
+                "web_model_json": model_json.exists(),
+                "web_model_bins": len(bin_files),
+                "classes": CLASSES_PATH.exists(),
+            },
+            "openrouter": {
+                "configured": bool(OPENROUTER_API_KEY),
+                "model": OPENROUTER_MODEL,
+            },
+            "cache": {"loaded_versions": list(local_models)},
+        }
+    )
+
+
+@app.route("/api/model-versions")
+def model_versions():
+    versions = ["current"]
+    if MODEL_VERSIONS_DIR.exists():
+        versions.extend(
+            sorted(
+                path.name
+                for path in MODEL_VERSIONS_DIR.iterdir()
+                if path.is_dir()
+                and (path / "animal_model.keras").exists()
+                and (path / "classes.json").exists()
+            )
+        )
+    return jsonify({"versions": versions})
+
+
+def get_local_model(version):
+    if version not in local_models:
+        import tensorflow as tf
+
+        if version == "current":
+            model_path = KERAS_MODEL_PATH
+            classes_path = CLASSES_PATH
+        else:
+            version_dir = MODEL_VERSIONS_DIR / version
+            model_path = version_dir / "animal_model.keras"
+            classes_path = version_dir / "classes.json"
+        if not model_path.exists() or not classes_path.exists():
+            raise FileNotFoundError(f"Local model version not found: {version}")
+        local_models[version] = tf.keras.models.load_model(str(model_path), compile=False)
+        with classes_path.open("r", encoding="utf-8") as handle:
+            local_classes[version] = json.load(handle)
+    return local_models[version], local_classes[version]
+
+
+@app.route("/api/local-predict", methods=["POST"])
+def local_predict():
+    image_file = flask_request.files.get("image")
+    if image_file is None:
+        return jsonify({"error": "No image uploaded."}), 400
+
+    try:
+        version = flask_request.form.get("version", "current")
+        if version != "current" and Path(version).name != version:
+            return jsonify({"error": "Invalid local model version."}), 400
+        image = Image.open(io.BytesIO(image_file.read())).convert("RGB")
+        image = image.resize((64, 64))
+        image_array = np.asarray(image, dtype=np.float32)[None, ...]
+        model, classes = get_local_model(version)
+        probabilities = model.predict(image_array, verbose=0)[0]
+        predictions = [
+            {"label": classes[index], "confidence": float(score * 100)}
+            for index, score in enumerate(probabilities)
+        ]
+        predictions.sort(key=lambda item: item["confidence"], reverse=True)
+        return jsonify({"predictions": predictions})
+    except Exception as exc:  # pragma: no cover
+        app.logger.exception("Local model prediction failed")
+        return jsonify({"error": f"Local model prediction failed: {exc}"}), 500
 
 
 @app.route("/model/web_model/<path:filename>")
@@ -124,7 +227,7 @@ def openrouter():
                 "content": [
                     {
                         "type": "text",
-                        "text": "Classify the main animal in the image. Return only valid JSON with keys: label and confidence. Use one of these exact animal labels: bear, cat, deer, dog, elephant, fox, giraffe, horse, lion, monkey, panda, rabbit, tiger, wolf, zebra. Confidence must be a number between 0 and 100.",
+                        "text": "Classify the main animal in the image. Return only valid JSON with keys: label and confidence. Use one of these exact animal labels: bear, cat, deer, dog, elephant, fox, giraffe, horse, lion, monkey, panda, rabbit, tiger, wolf, zebra, owl, penguin, shark, dolphin, snake. Confidence must be a number between 0 and 100.",
                     },
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ],
@@ -177,6 +280,11 @@ def openrouter():
             "tiger",
             "wolf",
             "zebra",
+            "owl",
+            "penguin",
+            "shark",
+            "dolphin",
+            "snake",
         }:
             raise ValueError("Invalid animal label returned by OpenRouter.")
         return jsonify({"animal": label, "confidence": max(0.0, min(confidence, 100.0))})

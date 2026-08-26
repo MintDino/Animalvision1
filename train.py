@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
+import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -28,12 +30,18 @@ CANONICAL_CLASS_ORDER = [
     "tiger",
     "wolf",
     "zebra",
+    "owl",
+    "penguin",
+    "shark",
+    "dolphin",
+    "snake",
 ]
 
 BASE_DIR = Path(__file__).resolve().parent
 DATASET_DIR = BASE_DIR / "dataset"
 MODELS_DIR = BASE_DIR / "models"
 MODEL_PATH = MODELS_DIR / "animal_model.keras"
+MODEL_VERSIONS_DIR = MODELS_DIR / "versions"
 HISTORY_PATH = MODELS_DIR / "training_history.json"
 CLASSES_PATH = MODELS_DIR / "classes.json"
 
@@ -68,6 +76,11 @@ def generate_synthetic_dataset():
                 "tiger": (218, 150, 38),
                 "wolf": (130, 138, 150),
                 "zebra": (180, 180, 180),
+                "owl": (112, 96, 78),
+                "penguin": (55, 75, 90),
+                "shark": (95, 130, 150),
+                "dolphin": (80, 150, 175),
+                "snake": (95, 135, 72),
             }[class_name]
             for channel in range(3):
                 image[:, :, channel] = np.clip(
@@ -245,9 +258,9 @@ def create_dataset():
         color_mode="rgb",
     )
 
-    train_ds = train_ds.shuffle(buffer_size=800)
-    train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
-    val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
+    train_ds = train_ds.shuffle(buffer_size=32)
+    train_ds = train_ds.prefetch(1)
+    val_ds = val_ds.prefetch(1)
     return train_ds, val_ds
 
 
@@ -255,6 +268,16 @@ def save_classes_json():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     with open(CLASSES_PATH, "w", encoding="utf-8") as handle:
         json.dump(CLASS_NAMES, handle, indent=2)
+
+
+def snapshot_model(version):
+    if not MODEL_PATH.exists():
+        return
+    version_dir = MODEL_VERSIONS_DIR / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(MODEL_PATH, version_dir / "animal_model.keras")
+    shutil.copy2(CLASSES_PATH, version_dir / "classes.json")
+    print(f"Saved model version: {version_dir}")
 
 
 def save_history(history):
@@ -309,17 +332,73 @@ def test_predictions(model, test_dir):
         print(f"{image_path.name} → {CLASS_NAMES[pred_index]} → {confidence:.2f}%")
 
 
+def continue_training(version, test_dir, class_counts, weights_map, train_ds, val_ds, epochs):
+    print("Continuing from the saved model checkpoint")
+    model = keras.models.load_model(str(MODEL_PATH), compile=False)
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    checkpoint = keras.callbacks.ModelCheckpoint(
+        str(MODEL_PATH),
+        save_best_only=True,
+        monitor="val_accuracy",
+        mode="max",
+    )
+    early_stop = keras.callbacks.EarlyStopping(
+        monitor="val_loss",
+        patience=5,
+        restore_best_weights=True,
+    )
+    reduce_lr = keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss",
+        factor=0.5,
+        patience=2,
+        min_lr=1e-7,
+    )
+    history = model.fit(
+        train_ds,
+        validation_data=val_ds,
+        epochs=epochs,
+        callbacks=[checkpoint, early_stop, reduce_lr],
+        class_weight=weights_map,
+    )
+    val_loss, val_accuracy = model.evaluate(val_ds, verbose=0)
+    print(f"\nValidation result: loss={val_loss:.4f}, accuracy={val_accuracy:.4f}")
+    save_history(history)
+    snapshot_model(version)
+    print_prediction_distribution(model, val_ds)
+    if test_dir:
+        test_predictions(model, Path(test_dir))
+    print(f"\nSaved model: {MODEL_PATH}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train the AnimalVision classifier.")
     parser.add_argument("--test", type=str, help="Optional test image directory")
+    parser.add_argument("--version", type=str, help="Optional model version name")
+    parser.add_argument("--continue", dest="continue_training", action="store_true", help="Continue from the saved model checkpoint")
+    parser.add_argument("--epochs", type=int, default=15, help="Epochs to run in continuation mode")
     args = parser.parse_args()
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    version = args.version or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if MODEL_PATH.exists() and CLASSES_PATH.exists():
+        snapshot_model(f"before-{version}")
     class_counts = ensure_dataset_ready()
     save_classes_json()
 
     weights_map = compute_class_weights(class_counts)
     train_ds, val_ds = create_dataset()
+
+    if args.continue_training:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(f"Saved model checkpoint not found: {MODEL_PATH}")
+        if args.epochs < 1:
+            raise ValueError("--epochs must be at least 1")
+        continue_training(args.version or "continued", args.test, class_counts, weights_map, train_ds, val_ds, args.epochs)
+        return
 
     model, base_model = build_model()
 
@@ -403,6 +482,7 @@ def main():
     print(f"\nValidation result: loss={val_loss:.4f}, accuracy={val_accuracy:.4f}")
 
     save_history_dict(combined_history)
+    snapshot_model(version)
     print_prediction_distribution(model, val_ds)
 
     if args.test:

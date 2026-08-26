@@ -3,7 +3,8 @@ const state = {
   selectedImage: null,
   model: null,
   classes: [],
-  mode: "local",
+  mode: document.body.dataset.mode || "local",
+  modelVersion: "current",
   isAnalyzing: false,
 };
 
@@ -19,7 +20,10 @@ const elements = {
   confidenceValue: document.getElementById("confidenceValue"),
   confidenceBar: document.getElementById("confidenceBar"),
   topPredictions: document.getElementById("topPredictions"),
-  modeButtons: [...document.querySelectorAll(".mode-button")],
+  modelVersion: document.getElementById("modelVersion"),
+  versionTrigger: document.querySelector(".version-trigger"),
+  versionLabel: document.querySelector(".version-label"),
+  versionOptions: document.querySelector(".version-options"),
 };
 
 function showMessage(message) {
@@ -30,16 +34,6 @@ function showMessage(message) {
 function clearMessage() {
   elements.messageBox.textContent = "";
   elements.messageBox.classList.add("hidden");
-}
-
-function setMode(mode) {
-  state.mode = mode;
-  elements.modeButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.mode === mode);
-  });
-  if (mode === "openrouter") {
-    clearMessage();
-  }
 }
 
 function readImageFile(file) {
@@ -72,124 +66,22 @@ function resetPreview() {
 }
 
 async function loadLocalModel() {
-  if (state.model) {
-    return state.model;
+  if (!state.selectedFile) {
+    throw new Error("Please choose an image first.");
   }
 
-  try {
-    const modelResponse = await fetch("/model/web_model/model.json");
-    if (!modelResponse.ok) {
-      throw new Error(`Model manifest request failed (${modelResponse.status}).`);
-    }
-
-    const modelJson = await modelResponse.json();
-    const modelTopology = normalizeTensorFlowJsTopology(modelJson.modelTopology);
-    const weightSpecs = modelJson.weightsManifest.flatMap((group) => group.weights);
-    const weightBuffers = await Promise.all(
-      modelJson.weightsManifest[0].paths.map(async (path) => {
-        const response = await fetch(`/model/web_model/${path}`);
-        if (!response.ok) {
-          throw new Error(`Model weights request failed (${response.status}).`);
-        }
-        return response.arrayBuffer();
-      }),
-    );
-    const weightData = new Uint8Array(
-      weightBuffers.reduce((total, buffer) => total + buffer.byteLength, 0),
-    );
-    let offset = 0;
-    weightBuffers.forEach((buffer) => {
-      weightData.set(new Uint8Array(buffer), offset);
-      offset += buffer.byteLength;
-    });
-
-    const model = await Promise.race([
-      tf.loadLayersModel({
-        load: async () => ({
-          modelTopology,
-          weightSpecs,
-          weightData,
-        }),
-      }),
-      new Promise((_, reject) => {
-        window.setTimeout(
-          () => reject(new Error("The local model took too long to load.")),
-          30000,
-        );
-      }),
-    ]);
-    state.model = model;
-    const response = await fetch("/model/web_model/classes.json");
-    state.classes = await response.json();
-    return model;
-  } catch (error) {
-    console.error(error);
-    throw new Error(`The local model could not be loaded: ${error.message}`);
-  }
-}
-
-function normalizeTensorFlowJsTopology(value) {
-  if (Array.isArray(value)) {
-    return value.map(normalizeTensorFlowJsTopology);
-  }
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  if (Array.isArray(value.args?.[0])) {
-    return value.args[0].map((tensor) => {
-      const history = tensor.config.keras_history;
-      return [
-        history[0],
-        history[1],
-        history[2],
-        normalizeTensorFlowJsTopology(value.kwargs || {}),
-      ];
-    });
-  }
-  if (value.args?.[0]?.config?.keras_history) {
-    const history = value.args[0].config.keras_history;
-    return [
-      history[0],
-      history[1],
-      history[2],
-      normalizeTensorFlowJsTopology(value.kwargs || {}),
-    ];
-  }
-
-  const normalized = {};
-  Object.entries(value).forEach(([key, child]) => {
-    if (key === "batch_shape") {
-      normalized.batchInputShape = normalizeTensorFlowJsTopology(child);
-    } else if (key === "inbound_nodes") {
-      normalized.inboundNodes = normalizeTensorFlowJsTopology(child);
-    } else if (key !== "optional") {
-      normalized[key] = normalizeTensorFlowJsTopology(child);
-    }
+  const formData = new FormData();
+  formData.append("image", state.selectedFile);
+  formData.append("version", state.modelVersion);
+  const response = await fetch("/api/local-predict", {
+    method: "POST",
+    body: formData,
   });
-  return normalized;
-}
-
-function preprocessImage(imageElement) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 64;
-
-  const context = canvas.getContext("2d");
-  context.drawImage(imageElement, 0, 0, 64, 64);
-
-  const imageData = context.getImageData(0, 0, 64, 64);
-  const pixels = new Float32Array(64 * 64 * 3);
-  let index = 0;
-  // MobileNetV2 preprocessing: normalize to [-1, 1]
-  for (let i = 0; i < imageData.data.length; i += 4) {
-    pixels[index] = (imageData.data[i] / 127.5) - 1.0;
-    pixels[index + 1] = (imageData.data[i + 1] / 127.5) - 1.0;
-    pixels[index + 2] = (imageData.data[i + 2] / 127.5) - 1.0;
-    index += 3;
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "The local model could not be loaded.");
   }
-
-  return tf.tensor(pixels, [1, 64, 64, 3], "float32");
+  return data.predictions;
 }
 
 function renderPredictions(predictions) {
@@ -222,34 +114,15 @@ async function classifyLocalModel() {
     const image = new Image();
     image.onload = async () => {
       try {
-        showMessage("Preprocessing image...");
-        const tensor = preprocessImage(image);
-        
         showMessage("Loading the local model...");
-        const model = await loadLocalModel();
+        const predictions = await loadLocalModel();
         showMessage("Running inference...");
-        const result = model.predict(tensor);
-        const probabilities = await Promise.race([
-          result.data(),
-          new Promise((_, reject) => {
-            window.setTimeout(
-              () => reject(new Error("Local inference took too long.")),
-              30000,
-            );
-          }),
-        ]);
-        const predictions = probabilities
-          .map((score, idx) => [state.classes[idx] || `class_${idx}`, score * 100])
-          .sort((a, b) => b[1] - a[1]);
-
-        const [topLabel, topScore] = predictions[0];
+        const [{ label: topLabel, confidence: topScore }] = predictions;
         elements.animalName.textContent = topLabel;
         elements.confidenceValue.textContent = `${topScore.toFixed(1)}%`;
         elements.confidenceBar.style.width = `${Math.min(topScore, 100)}%`;
-        renderPredictions(predictions);
+        renderPredictions(predictions.map(({ label, confidence }) => [label, confidence]));
         clearMessage();
-        tensor.dispose();
-        result.dispose();
       } catch (error) {
         console.error(error);
         showMessage("Error during analysis: " + error.message);
@@ -323,8 +196,55 @@ async function analyzeImage() {
 }
 
 function bindEvents() {
-  elements.modeButtons.forEach((button) => {
-    button.addEventListener("click", () => setMode(button.dataset.mode));
+  elements.versionTrigger.addEventListener("click", () => {
+    const isOpen = elements.versionTrigger.getAttribute("aria-expanded") === "true";
+    elements.versionTrigger.setAttribute("aria-expanded", String(!isOpen));
+    elements.versionOptions.hidden = isOpen;
+    if (!isOpen) {
+      elements.versionOptions.querySelector(".version-option")?.focus();
+    }
+  });
+
+  elements.versionOptions.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-version]");
+    if (!option) return;
+    state.modelVersion = option.dataset.version;
+    elements.versionLabel.textContent = option.textContent;
+    elements.versionTrigger.setAttribute("aria-expanded", "false");
+    elements.versionOptions.hidden = true;
+    resetPreview();
+    clearMessage();
+  });
+
+  elements.versionTrigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    elements.versionTrigger.click();
+  });
+
+  elements.versionOptions.addEventListener("keydown", (event) => {
+    const options = [...elements.versionOptions.querySelectorAll(".version-option")];
+    const currentIndex = options.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      options[(currentIndex + offset + options.length) % options.length]?.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      document.activeElement?.click();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      elements.versionTrigger.setAttribute("aria-expanded", "false");
+      elements.versionOptions.hidden = true;
+      elements.versionTrigger.focus();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!elements.modelVersion.contains(event.target)) {
+      elements.versionTrigger.setAttribute("aria-expanded", "false");
+      elements.versionOptions.hidden = true;
+    }
   });
 
   elements.input.addEventListener("change", (event) => {
@@ -363,4 +283,25 @@ function bindEvents() {
   });
 }
 
+async function loadModelVersions() {
+  try {
+    const response = await fetch("/api/model-versions");
+    if (!response.ok) return;
+    const data = await response.json();
+    elements.versionOptions.innerHTML = "";
+    data.versions.forEach((version) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.version = version;
+      option.className = "version-option";
+      option.textContent = version === "current" ? "Current model" : version;
+      elements.versionOptions.appendChild(option);
+    });
+  } catch (error) {
+    console.error("Could not load model versions", error);
+  }
+}
+
 bindEvents();
+loadModelVersions();

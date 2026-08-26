@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Debug | AnimalVision</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="container debug-container">
+      <header class="header">
+        <h1>Developer Console</h1>
+        <p>Runtime status and browser diagnostics</p>
+        <nav class="page-links" aria-label="Application pages">
+          <a class="page-link" href="/">My Model</a>
+          <a class="page-link" href="/openrouter">OpenRouter</a>
+          <a class="page-link active" href="/debug">Debug</a>
+        </nav>
+      </header>
+
+      <section class="debug-toolbar">
+        <span id="debugStatus" class="status-dot">Connecting</span>
+        <button id="refreshDebug" class="ghost" type="button">Refresh status</button>
+        <button id="clearConsole" class="ghost" type="button">Clear console</button>
+      </section>
+      <section class="debug-grid">
+        <div class="debug-panel"><h2>System status</h2><dl id="systemStatus" class="status-list"><div><dt>Loading</dt><dd>...</dd></div></dl></div>
+        <div class="debug-panel"><h2>Console output</h2><div id="consoleOutput" class="console-output" role="log" aria-live="polite"></div></div>
+      </section>
+    </main>
+    <script src="/static/debug.js?v=1"></script>
+  </body>
+</html>
