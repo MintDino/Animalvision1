@@ -9,8 +9,8 @@
   <body>
     <main class="container debug-container">
       <header class="header">
-        <h1>Developer Console</h1>
-        <p>Runtime status and browser diagnostics</p>
+        <h1>AnimalVision Debug Center</h1>
+        <p>Live runtime status, endpoint registry, and browser logs</p>
         <nav class="page-links" aria-label="Application pages">
           <a class="page-link" href="/">My Model</a>
           <a class="page-link" href="/openrouter">OpenRouter</a>
@@ -25,9 +25,10 @@
       </section>
       <section class="debug-grid">
         <div class="debug-panel"><h2>System status</h2><dl id="systemStatus" class="status-list"><div><dt>Loading</dt><dd>...</dd></div></dl></div>
+        <div class="debug-panel"><h2>Registered routes</h2><ul id="routeList" class="route-list"><li>Loading...</li></ul></div>
         <div class="debug-panel"><h2>Console output</h2><div id="consoleOutput" class="console-output" role="log" aria-live="polite"></div></div>
       </section>
     </main>
-    <script src="/static/debug.js?v=1"></script>
+    <script src="/static/debug.js?v=2"></script>
   </body>
 </html>

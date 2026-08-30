@@ -4,6 +4,8 @@ import base64
 import io
 import json
 import os
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error as urllib_error
 import urllib.request as urllib_request
@@ -98,15 +100,31 @@ def health():
 def debug_info():
     model_json = MODEL_DIR / "model.json"
     bin_files = list(MODEL_DIR.glob("*.bin"))
+    routes = sorted(
+        (
+            {
+                "path": rule.rule,
+                "methods": sorted(method for method in rule.methods if method not in {"HEAD", "OPTIONS"}),
+            }
+            for rule in app.url_map.iter_rules()
+        ),
+        key=lambda entry: entry["path"],
+    )
     return jsonify(
         {
-            "server": {"status": "online", "debug": app.debug},
-            "routes": ["/", "/openrouter", "/debug", "/health"],
+            "server": {
+                "status": "online",
+                "debug": app.debug,
+                "python": sys.version.split(" ", maxsplit=1)[0],
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+            "routes": routes,
             "local_model": {
                 "keras": KERAS_MODEL_PATH.exists(),
                 "web_model_json": model_json.exists(),
                 "web_model_bins": len(bin_files),
                 "classes": CLASSES_PATH.exists(),
+                "default_version": LOCAL_MODEL_VERSION,
             },
             "openrouter": {
                 "configured": bool(OPENROUTER_API_KEY),

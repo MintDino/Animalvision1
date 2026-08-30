@@ -391,6 +391,11 @@ button.ghost {
 .console-entry { white-space: pre-wrap; overflow-wrap: anywhere; }
 .console-entry.warn { color: #f0d08c; }
 .console-entry.error { color: #f1a3a3; }
+.route-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+.route-list li { display: grid; grid-template-columns: minmax(75px, auto) 1fr; align-items: center; gap: 10px; font-size: 0.84rem; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.route-list li:last-child { border-bottom: 0; }
+.route-list code { background: #e5ede8; color: var(--accent-strong); border-radius: 4px; padding: 3px 6px; font: 700 0.72rem/1.2 monospace; text-align: center; }
+.route-list span { overflow-wrap: anywhere; color: var(--text); }
 
 @media (max-width: 480px) {
   .container {

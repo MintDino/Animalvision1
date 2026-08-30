@@ -196,56 +196,58 @@ async function analyzeImage() {
 }
 
 function bindEvents() {
-  elements.versionTrigger.addEventListener("click", () => {
-    const isOpen = elements.versionTrigger.getAttribute("aria-expanded") === "true";
-    elements.versionTrigger.setAttribute("aria-expanded", String(!isOpen));
-    elements.versionOptions.hidden = isOpen;
-    if (!isOpen) {
-      elements.versionOptions.querySelector(".version-option")?.focus();
-    }
-  });
+  if (elements.versionTrigger && elements.versionOptions && elements.modelVersion && elements.versionLabel) {
+    elements.versionTrigger.addEventListener("click", () => {
+      const isOpen = elements.versionTrigger.getAttribute("aria-expanded") === "true";
+      elements.versionTrigger.setAttribute("aria-expanded", String(!isOpen));
+      elements.versionOptions.hidden = isOpen;
+      if (!isOpen) {
+        elements.versionOptions.querySelector(".version-option")?.focus();
+      }
+    });
 
-  elements.versionOptions.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-version]");
-    if (!option) return;
-    state.modelVersion = option.dataset.version;
-    elements.versionLabel.textContent = option.textContent;
-    elements.versionTrigger.setAttribute("aria-expanded", "false");
-    elements.versionOptions.hidden = true;
-    resetPreview();
-    clearMessage();
-  });
-
-  elements.versionTrigger.addEventListener("keydown", (event) => {
-    if (!["ArrowDown", "Enter", " "].includes(event.key)) return;
-    event.preventDefault();
-    elements.versionTrigger.click();
-  });
-
-  elements.versionOptions.addEventListener("keydown", (event) => {
-    const options = [...elements.versionOptions.querySelectorAll(".version-option")];
-    const currentIndex = options.indexOf(document.activeElement);
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const offset = event.key === "ArrowDown" ? 1 : -1;
-      options[(currentIndex + offset + options.length) % options.length]?.focus();
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      document.activeElement?.click();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
+    elements.versionOptions.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-version]");
+      if (!option) return;
+      state.modelVersion = option.dataset.version;
+      elements.versionLabel.textContent = option.textContent;
       elements.versionTrigger.setAttribute("aria-expanded", "false");
       elements.versionOptions.hidden = true;
-      elements.versionTrigger.focus();
-    }
-  });
+      resetPreview();
+      clearMessage();
+    });
 
-  document.addEventListener("click", (event) => {
-    if (!elements.modelVersion.contains(event.target)) {
-      elements.versionTrigger.setAttribute("aria-expanded", "false");
-      elements.versionOptions.hidden = true;
-    }
-  });
+    elements.versionTrigger.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      elements.versionTrigger.click();
+    });
+
+    elements.versionOptions.addEventListener("keydown", (event) => {
+      const options = [...elements.versionOptions.querySelectorAll(".version-option")];
+      const currentIndex = options.indexOf(document.activeElement);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const offset = event.key === "ArrowDown" ? 1 : -1;
+        options[(currentIndex + offset + options.length) % options.length]?.focus();
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        document.activeElement?.click();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        elements.versionTrigger.setAttribute("aria-expanded", "false");
+        elements.versionOptions.hidden = true;
+        elements.versionTrigger.focus();
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!elements.modelVersion.contains(event.target)) {
+        elements.versionTrigger.setAttribute("aria-expanded", "false");
+        elements.versionOptions.hidden = true;
+      }
+    });
+  }
 
   elements.input.addEventListener("change", (event) => {
     const [file] = event.target.files;
@@ -283,7 +285,22 @@ function bindEvents() {
   });
 }
 
+function getVersionLabel(version) {
+  const labels = {
+    "current": "AnimalVision v1.0 — Current (active)",
+    "v0.0_initial": "AnimalVision v0.0 — Initial",
+    "v0.1_improved": "AnimalVision v0.1 — Improved",
+    "v0.2_checkpoint": "AnimalVision v0.2 — Checkpoint",
+    "v1.1_finetuned": "AnimalVision v1.1 — Fine-tuned (experimental)",
+  };
+  return labels[version] || version;
+}
+
 async function loadModelVersions() {
+  if (!elements.versionOptions || !elements.versionLabel) {
+    return;
+  }
+
   try {
     const response = await fetch("/api/model-versions");
     if (!response.ok) return;
@@ -295,13 +312,21 @@ async function loadModelVersions() {
       option.setAttribute("role", "option");
       option.dataset.version = version;
       option.className = "version-option";
-      option.textContent = version === "current" ? "Current model" : version;
+      option.textContent = getVersionLabel(version);
       elements.versionOptions.appendChild(option);
     });
+    // Set initial label
+    if (data.versions.length > 0) {
+      const currentIdx = data.versions.indexOf("current");
+      const defaultVersion = currentIdx >= 0 ? "current" : data.versions[0];
+      elements.versionLabel.textContent = getVersionLabel(defaultVersion);
+    }
   } catch (error) {
     console.error("Could not load model versions", error);
   }
 }
 
 bindEvents();
-loadModelVersions();
+if (state.mode !== "openrouter") {
+  loadModelVersions();
+}

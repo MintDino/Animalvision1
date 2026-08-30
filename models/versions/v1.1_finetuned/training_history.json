@@ -1,0 +1,10 @@
+{
+  "version": "v1.1",
+  "epochs": 4,
+  "final_accuracy": 0.2851039469242096,
+  "final_val_accuracy": 0.3580387830734253,
+  "final_loss": 2.353342294692993,
+  "final_val_loss": 2.1388583183288574,
+  "best_val_accuracy": 0.36145952343940735,
+  "training_date": "2026-08-30T06:20:35.547179+00:00"
+}
